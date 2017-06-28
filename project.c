@@ -1,32 +1,35 @@
 #include <avr/io.h>
-#include <avr/interrupt.h>
-
-#define _NOP() do { __asm__ __volatile__ ("nop"); } while (0)
+//#define F_CPU 20000000L
+//#include <util/delay.h>
+#define _NOP(); { __asm__ __volatile__ ("nop"); }
 #define FOSC 20000000 //clock speed
 //#define BAUD 125000
 #define MYUBRR 24//FOSC/8/(BAUD + 1)
-#define DShim (int)12500
-#define Bounce 245
+#define DShim (uint16_t)12500
+#define Bounce 250
 void USART_Init(unsigned int);
 void ADC_Init(void);
 void timer_counter1_INIT();
 int main (void)
 {
+	volatile uint16_t temperCounter = 0;
 	volatile unsigned char tmp = 0;
 	volatile unsigned int i = 0;
 	//volatile unsigned char j = 0;
 	volatile unsigned char sum = 0;
 	volatile unsigned char a1 = 0;
 	volatile unsigned char dataUsart = 0;
-	volatile unsigned char temperature = 0;
+	volatile uint8_t temperature = 0;
 	volatile unsigned char counterUsart = 0;
 	volatile unsigned char n = 0;
 	volatile unsigned char podsvet = 0;
 	volatile unsigned char coef = 0;
-	volatile unsigned int cnt_shim = 0;
+	volatile uint16_t cnt_shim = 0;
 	volatile unsigned char buttons = 0;
 	volatile unsigned char temp_cnt = 0;
-	volatile unsigned char temp_buf;
+	volatile uint32_t temp_buf = 0xFFFFFFFF;
+
+	volatile unsigned char trash;
 	//Init data direction registors
 	DDRC = (1 << DDC0) | (1 << DDC1) | (1 << DDC5);
 	DDRB = (1 << DDB6) | (1 << DDB4) | (7 << DDB0);//comments on paper
@@ -37,7 +40,7 @@ int main (void)
 		
 	unsigned char slovo[32] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 								0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-								0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+								0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
 								0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01};
 	//CKSEL3 = 0; CKSEL2 = 1; CKSEL1 = 1; 
 	//pull-up_resistors_deactivated default and activated on unused pins
@@ -47,7 +50,7 @@ int main (void)
 	//read coef from eeprom
 	EEAR = 0x0000;
 	EECR = 0x01;
-	coef = EEDR;
+	coef = EEDR & 0x0F;
 	while(1)
 	{
 	//ispravnost obogreva-----------------------------
@@ -86,10 +89,10 @@ int main (void)
 	//temperatura ADC-------------------------
 	ADCSRA |= (1 << ADSC);
 	while((ADCSRA & 0b01000000)){};
-		temp_buf = ADCH;
-	if(temperature == temp_buf){
-		temp_cnt++;
-		if(temp_cnt == Bounce){
+		if(temperCounter == 2048){
+			temperCounter = 0;
+			temperature = (uint8_t)(temp_buf >> 11);
+			temp_buf = 0;
 			slovo[12] = (0b10000000 & temperature) >> 7;
 			slovo[13] = (0b01000000 & temperature) >> 6;
 			slovo[14] = (0b00100000 & temperature) >> 5;
@@ -98,24 +101,43 @@ int main (void)
 			slovo[17] = (0b00000100 & temperature) >> 2;
 			slovo[18] = (0b00000010 & temperature) >> 1;
 			slovo[19] = (0b00000001 & temperature);
-			temp_cnt = 0;
+		}else{
+			temperCounter++;
 		}
+		temp_buf+= ADCH;
+
+
+		/*PORTC |= (1 << PC5);
+		//_delay_us(10);
+		unsigned char qwert = 0;
+		for(qwert = 0; qwert < 255; ){
+			qwert++;
+		}
+		PORTC &= ~(1 << PC5);*/
+	//if(temp_cnt == Bounce){
+			/*PORTB |= (1 << PB0);
+			unsigned char qwert1 = 0;
+			for(qwert1 = 0; qwert1 < 255; ){
+				qwert1++;
+			}
+			PORTB &= ~(1 << PB0);*/
+			
+			
+	//}
+/*	else{
+		temp_cnt++;
 	}
-	else{
-		temp_cnt = 0;
-		temperature = temp_buf;
-	}
-	
-	if(temperature <= 123)//vkl obogreva
+	*/
+	if(temperature <= 123)//otkl obogreva
 	{
 		slovo[20] = 0x00;
-		PORTB = (PINB & ~(1 << PB2));
+		PORTB = ~(1 << PB2);
 
 	}
-	else if (temperature >= 135)//otkl obogreva
+	else if (temperature >= 135)//vkl obogreva
 	{
 		slovo[20] = 0x01;
-		PORTB = (PINB & ~(1 << PB2));
+		PORTB |= (1 << PB2);
 	}
 	//-----------------------------------------
 
@@ -144,7 +166,7 @@ int main (void)
 	{						
 			counterUsart = 0;	
 			//dataUsart = UDR0;
-			PORTB = PINB | 0x01;	
+			//PORTB = PINB | 0x01;	
 			while (UCSR0A & (1<<RXC0) ){
 				if((((1 << FE0) & UCSR0A) == 0) && (((1 << UPE0) & UCSR0A) == 0)){
 					dataUsart = UDR0;			 
@@ -153,11 +175,11 @@ int main (void)
 					PORTB = (PINB & 0xFE) | ((var) & ~0xFE);
 			 		var = var >> 1;*/
 			 	}else{
-					volatile unsigned char trash = UDR0;
+					trash = UDR0;
 				}
 			}			 
-			 PORTB = PINB | 0x01;
-			 PORTB = PINB & ~0x01;
+			 //PORTB = PINB | 0x01;
+			 //PORTB = PINB & ~0x01;
 			//PORTC = PORTC & ~(1 << PC5);
 			slovo[29] = 0x01;
 			
@@ -182,15 +204,16 @@ int main (void)
 			PORTC = PINC & ~(1 << PC5);*/
 			if((dataUsart & 0b01000000) >> 6)//day
 			{
-				ICR1 = ((dataUsart) & 0b00111111) * coef + 64;
+				OCR1A = ((dataUsart) & 0b00111111) * coef + 64;
 			}
 			else//night
 			{
-				ICR1 = (dataUsart) & 0b00111111;
+				OCR1A = (dataUsart) & 0b00111111;
 			}
 		}
 	}else{
 		cnt_shim++;
+			
 	}
 	//-------------------------------------------
 	/*for(char n = 0; n < 250; n++)
@@ -217,13 +240,21 @@ void USART_Init(unsigned int ubrr) //Usart_initialization async //unsigned int u
 {
 	UBRR0L = (unsigned char)ubrr;
 	UBRR0H = (unsigned char)(ubrr>>8);
+	UCSR0A = (1 << U2X0);
     UCSR0B = (1 << RXEN0);// 0b00001000; //EN_ //UBRR0H = (unsigned char)(ubrr>>8); //BAUD RATE //	UBRR0L = (unsigned char)ubrr;
 	UCSR0C = (0 << UMSEL00) | (0 << UPM00) | (1 << UPM01) | (1 << UCSZ01) | (1 << UCSZ00) | (0 << UCPOL0);//0b01000111; //FORMAT_DATA p.s. parity?
 }
 void timer_counter1_INIT()
 {
-		TCCR1A = (1 << COM1A1);
+		TCCR1A = (1 << COM1A1);// | (1 << WGM10);
 		TCCR1B = (1 << WGM13) | (1 << CS11) | (1 << CS10);
+		//ICR1H = 3;
+		//ICR1L = 0xFF;
+		ICR1H = 0x03;
+		ICR1L = 0xFF;
+		OCR1A = 0x00;
+		//ICR1 = 63;
+		//OCR1A = 0x3FE;
 		//ICR1 = 0x03FF;
 		//ICR1 = 63;
 		//OCR1A = 0x3FE;
